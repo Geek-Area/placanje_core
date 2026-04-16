@@ -1,0 +1,17 @@
+.DS_Store
+
+backend/.env
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/placanje_core_backend.egg-info/
+
+tester/node_modules/
+tester/dist/
+tester/*.tsbuildinfo
+
+docs/
+IMPORTANT.md
+Gliga x Veljko Meet.txt
+Plaćanje.RS Roadmap.png
