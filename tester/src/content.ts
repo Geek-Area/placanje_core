@@ -1,10 +1,10 @@
-export type DocEndpointGroup = "public" | "consumer" | "merchant" | "webhook";
+export type DocEndpointGroup = "public" | "consumer" | "merchant" | "bank";
 
 export type EndpointDoc = {
   id: string;
   group: DocEndpointGroup;
   title: string;
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   path: string;
   auth: "Public" | "Bearer JWT" | "Server-to-server";
   description: string;
@@ -31,7 +31,7 @@ export const endpointGroups: Array<{ id: DocEndpointGroup; label: string }> = [
   { id: "public", label: "Public pay slips" },
   { id: "consumer", label: "Consumer" },
   { id: "merchant", label: "Merchant POS" },
-  { id: "webhook", label: "Bank webhook" },
+  { id: "bank", label: "Bank sync" },
 ];
 
 export const productTracks: ProductTrack[] = [
@@ -55,16 +55,17 @@ export const productTracks: ProductTrack[] = [
     title: "Instant.Plaćanje.RS",
     eyebrow: "Merchant POS",
     summary:
-      "Merchant onboarding plus organization and POS sub-accounts, where the POS account creates the payment request that later gets updated by the bank callback.",
+      "Owner creates POS accounts and POS logins, and each POS can generate its own IPS QR or send request-to-pay from buyer QR data.",
     points: [
       "Uses form_type=ips internally.",
-      "Parent organization sees child POS accounts.",
-      "POS rows start as awaiting_payment and move after webhook processing.",
+      "Owner sees the company account and its POS accounts.",
+      "SKENIRAJ rows start as awaiting_payment.",
+      "POKAŽI sends buyer data to the bank and returns success or failure.",
     ],
     defaultEndpointGroup: "merchant",
     actions: [
       { label: "Open merchant APIs", group: "merchant" },
-      { label: "Open webhook API", group: "webhook" },
+      { label: "Open bank sync APIs", group: "bank" },
     ],
   },
   {
@@ -99,7 +100,7 @@ export const implementationLayers = [
       "JWT verification and account authorization",
       "Creating payment_ref, share_slug, and stored payment records",
       "Merchant hierarchy and POS account permissions",
-      "Webhook signature verification and transaction status updates",
+      "Bank profile handling, QR references, and transaction status updates",
     ],
   },
 ];
@@ -132,9 +133,10 @@ export const flowCards = [
     subtitle: "Organization owner or operator",
     steps: [
       "POST /v1/merchant/signup once for the organization",
-      "Create child POS accounts under /sub-accounts",
-      "POST /transactions from the selected POS account",
-      "Bank or demo webhook marks the row as completed later",
+      "Create POS accounts under /sub-accounts",
+      "Attach the bank profile (bank user id + TID) to the selected POS account",
+      "Use SKENIRAJ via POST /transactions or POKAŽI via POST /request-to-pay",
+      "For SKENIRAJ call sync-bank-status until the bank returns a final status",
     ],
     testSectionId: "testing-merchant",
   },
@@ -151,50 +153,7 @@ export const statusLifecycles = [
     name: "Merchant POS IPS",
     states: ["awaiting_payment", "completed", "expired"],
     note:
-      "A POS payment is created before the customer pays, so the bank callback has an existing record to update.",
-  },
-];
-
-export const transactionFieldGlossary = [
-  {
-    field: "payment_ref",
-    meaning: "Backend-generated reference used to correlate the payment record and bank callback.",
-    whenFilled: "Always on creation",
-  },
-  {
-    field: "form_type",
-    meaning: "Internal product bucket. regular = pay slips, ips = merchant POS.",
-    whenFilled: "Always on creation",
-  },
-  {
-    field: "status",
-    meaning: "Lifecycle state of the payment record.",
-    whenFilled: "Always on creation, updated later",
-  },
-  {
-    field: "merchant_account_id",
-    meaning: "Links the row to a merchant organization or POS account when the flow is merchant-driven.",
-    whenFilled: "Merchant POS only",
-  },
-  {
-    field: "reference_model / reference_number",
-    meaning: "Serbian payment reference data used in the IPS payload.",
-    whenFilled: "Optional, but recommended",
-  },
-  {
-    field: "bank_transaction_ref",
-    meaning: "Reference echoed back by the bank or demo webhook after completion.",
-    whenFilled: "Webhook-completed payments",
-  },
-  {
-    field: "completed_at",
-    meaning: "Timestamp recorded when the payment is marked as completed.",
-    whenFilled: "Completed payments only",
-  },
-  {
-    field: "qr_string",
-    meaning: "Generated IPS payload string. Frontend can turn this into a visible QR image.",
-    whenFilled: "Creation responses and share responses",
+      "A POS payment is created before or during bank execution, so the backend always has a stable record to update after bank confirmation.",
   },
 ];
 
@@ -375,6 +334,55 @@ export const endpointDocs: EndpointDoc[] = [
     testSectionId: "testing-consumer",
   },
   {
+    id: "merchant-session",
+    group: "merchant",
+    title: "Load current owner context",
+    method: "GET",
+    path: "/v1/merchant/session",
+    auth: "Bearer JWT",
+    description:
+      "Returns the currently signed-in merchant user plus the merchant/POS accounts visible from that token.",
+    requestExample: null,
+    responseExample: {
+      user_id: "82616ad0-e7a0-4f9c-ab91-0f5fec88fec0",
+      email: "operator@example.com",
+      display_name: "Operator",
+      accounts: [
+        {
+          id: "03173421-b004-432b-9761-5a256deba118",
+          account_type: "pos",
+          display_name: "Lilly Shop 1",
+          effective_role: "operator",
+        },
+      ],
+    },
+    notes: [
+      "Use this after login if the frontend needs a single bootstrapping call.",
+      "This is the plain answer to: who is logged in and what can they see?",
+    ],
+    testSectionId: "testing-auth",
+  },
+  {
+    id: "merchant-logout",
+    group: "merchant",
+    title: "Log out owner session",
+    method: "POST",
+    path: "/v1/merchant/logout",
+    auth: "Bearer JWT",
+    description:
+      "Revokes the current authenticated session through Supabase-backed logout. Use it when the current device should be logged out now.",
+    requestExample: null,
+    responseExample: {
+      status: "revoked",
+      scope: "global",
+    },
+    notes: [
+      "This is about the user's login session, not about bank tokens or invite tokens.",
+      "The tester also clears the browser session after this call.",
+    ],
+    testSectionId: "testing-auth",
+  },
+  {
     id: "merchant-signup",
     group: "merchant",
     title: "Create merchant organization",
@@ -412,12 +420,12 @@ export const endpointDocs: EndpointDoc[] = [
   {
     id: "merchant-sub-account",
     group: "merchant",
-    title: "Create POS sub-account",
+    title: "Create POS account",
     method: "POST",
     path: "/v1/merchant/accounts/{account_id}/sub-accounts",
     auth: "Bearer JWT",
     description:
-      "Creates the POS or store-level account under the selected organization. This POS account is the actual source of payment creation.",
+      "Creates the POS or store-level account under the selected organization.",
     requestExample: {
       display_name: "Lilly Shop 1",
       payee_name: "Matija",
@@ -440,19 +448,19 @@ export const endpointDocs: EndpointDoc[] = [
     },
     notes: [
       "POS stands for Point of Sale.",
-      "Parent organizations can see child POS accounts in the merchant list endpoint.",
+      "Owner accounts can see POS accounts in the merchant list endpoint.",
     ],
     testSectionId: "testing-merchant",
   },
   {
     id: "merchant-create-transaction",
     group: "merchant",
-    title: "Create POS IPS transaction",
+    title: "Create SKENIRAJ merchant QR transaction",
     method: "POST",
     path: "/v1/merchant/accounts/{account_id}/transactions",
     auth: "Bearer JWT",
     description:
-      "Creates the merchant IPS payment request. This is the row the webhook updates later.",
+      "Creates the merchant-side IPS QR payment request. This is the SKENIRAJ flow where the customer scans the merchant QR and the backend later syncs the bank status.",
     requestExample: {
       amount: "450.00",
       payment_description: "Test payment",
@@ -462,13 +470,15 @@ export const endpointDocs: EndpointDoc[] = [
     responseExample: {
       transaction_id: "4e630023-7ebc-4635-af1d-b6c988f47341",
       payment_ref: "PLC-E52D9ED2B4A467BB",
+      bank_credit_transfer_identificator: "TID1234526106000001",
       status: "awaiting_payment",
       qr_string:
-        "K:PR|V:01|C:1|R:160000000000000000|N:Matija\\nTamoNegde\\nNis|I:RSD450,00|SF:289|S:Test payment|RO:9712345",
+        "K:PT|V:01|C:1|R:160000000000000000|N:Matija\\nTamoNegde\\nNis|I:RSD450,00|SF:221|M:5411|RP:TID1234526106000001|S:Test payment",
     },
     notes: [
       "Use a POS account id here, not a random user id.",
       "The frontend can render the returned qr_string immediately.",
+      "This is not a public PR pay-slip QR. It is a merchant IPS QR.",
     ],
     testSectionId: "testing-pos",
   },
@@ -489,7 +499,7 @@ export const endpointDocs: EndpointDoc[] = [
     },
     notes: [
       "Supports limit and offset query params.",
-      "The history becomes useful after POS creation and webhook completion.",
+      "The history becomes useful after POS creation and later bank completion or failure.",
     ],
     testSectionId: "testing-pos",
   },
@@ -518,33 +528,85 @@ export const endpointDocs: EndpointDoc[] = [
     testSectionId: "testing-pos",
   },
   {
-    id: "webhook-status",
-    group: "webhook",
-    title: "Bank IPS status callback",
-    method: "POST",
-    path: "/v1/webhooks/bank/{provider}/ips-status",
-    auth: "Server-to-server",
+    id: "bank-profile",
+    group: "bank",
+    title: "Attach bank profile to POS account",
+    method: "PUT",
+    path: "/v1/merchant/accounts/{account_id}/bank-profile",
+    auth: "Bearer JWT",
     description:
-      "This is not a browser endpoint. A bank integration or the tester’s fake webhook signs the payload and marks the matching payment_ref as completed.",
+      "Stores the bank-side identity for the selected POS account: provider, bank username, and TID.",
     requestExample: {
-      headers: {
-        "X-Signature": "hex-hmac-signature",
-      },
-      body: {
-        payment_ref: "PLC-E52D9ED2B4A467BB",
-        bank_transaction_ref: "BANK-DEMO-001",
-        status: "completed",
-        amount: "450.00",
-        completed_at: "2026-04-15T00:10:00.000Z",
-      },
+      provider: "banca_intesa",
+      bank_user_id: "merchant_user_from_bank",
+      terminal_identificator: "TID12345",
     },
     responseExample: {
-      status: "ok",
+      merchant_account_id: "03173421-b004-432b-9761-5a256deba118",
+      provider: "banca_intesa",
+      bank_user_id: "merchant_user_from_bank",
+      terminal_identificator: "TID12345",
+      active: true,
     },
     notes: [
-      "The signature must match BANK_WEBHOOK_SECRET on the backend.",
-      "The frontend should never expose the webhook secret.",
-      "The tester can simulate this flow locally for MVP validation.",
+      "Plain English: this is how the backend knows which bank POS identity belongs to this shop.",
+      "Without this, SKENIRAJ sync and POKAŽI requestToPay cannot call the bank.",
+    ],
+    testSectionId: "testing-merchant",
+  },
+  {
+    id: "bank-sync-status",
+    group: "bank",
+    title: "Sync SKENIRAJ transaction status with bank",
+    method: "POST",
+    path: "/v1/merchant/accounts/{account_id}/transactions/{transaction_id}/sync-bank-status",
+    auth: "Bearer JWT",
+    description:
+      "Calls the bank POS backend checkCTStatus endpoint for the selected SKENIRAJ transaction and updates the local row with the newest bank status.",
+    requestExample: null,
+    responseExample: {
+      id: "4e630023-7ebc-4635-af1d-b6c988f47341",
+      payment_ref: "PLC-E52D9ED2B4A467BB",
+      status: "completed",
+      bank_status_code: "00",
+      bank_status_description: "executed",
+      bank_credit_transfer_identificator: "TID1234526106000001",
+    },
+    notes: [
+      "Use this only for SKENIRAJ merchant QR flow.",
+      "Status 82 means the bank still does not know the final outcome, so call it again after a short delay.",
+    ],
+    testSectionId: "testing-pos",
+  },
+  {
+    id: "bank-request-to-pay",
+    group: "bank",
+    title: "Send POKAŽI requestToPay",
+    method: "POST",
+    path: "/v1/merchant/accounts/{account_id}/request-to-pay",
+    auth: "Bearer JWT",
+    description:
+      "Accepts buyer-side QR data such as debtor account and OTP, then forwards requestToPay to the bank and stores the resulting merchant transaction row.",
+    requestExample: {
+      amount: "450.00",
+      debtor_account_number: "340000000000000001",
+      one_time_code: "123456",
+      debtor_reference: "kupac-ref-1",
+      debtor_name: "Petar Petrovic",
+      debtor_address: "Nemanjina 1",
+      payment_purpose: "Racun 15",
+    },
+    responseExample: {
+      id: "9ef4b155-e9e0-43f9-9872-f8efcdb00d11",
+      payment_ref: "PLC-DF9D10D11AFDB610",
+      status: "completed",
+      bank_status_code: "00",
+      bank_status_description: "executed",
+      bank_credit_transfer_identificator: "TID1234526106000002",
+    },
+    notes: [
+      "Use this for POKAŽI only, not for merchant QR.",
+      "In plain English: customer shows their QR, backend sends the bank request immediately, and the answer is success or failure.",
     ],
     testSectionId: "testing-pos",
   },
@@ -553,6 +615,6 @@ export const endpointDocs: EndpointDoc[] = [
 export const frontendChecklist = [
   "Use Supabase Auth in the client, then send the returned access_token as Bearer JWT to authenticated backend endpoints.",
   "Treat qr_string as backend-generated source data. The frontend can convert it into an actual QR image client-side.",
-  "Store backend base URL, Supabase URL, and publishable key as frontend config. Store BANK_WEBHOOK_SECRET only on the backend or in internal tools.",
-  "For merchant flows, fetch merchant accounts first, then let the user select the organization or POS account before creating child accounts or POS payments.",
+  "Store backend base URL, Supabase URL, and publishable key as frontend config. Store bank credentials and any webhook secret only on the backend or in internal tools.",
+  "For merchant flows, fetch merchant accounts first, then let the user select the organization or POS account before creating child accounts or bank-driven POS payments.",
 ];

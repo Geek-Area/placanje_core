@@ -6,6 +6,7 @@ from uuid import UUID
 import asyncpg
 
 from app.core.errors import Gone, NotFound
+from app.domain.bank_pos import build_merchant_pos_scan_qr_string
 from app.domain.models import (
     CreatePosTransactionRequest,
     CreatePublicTransactionRequest,
@@ -40,6 +41,9 @@ class RegularTransactionWriter(Protocol):
         payload: CreatePosTransactionRequest,
         qr_string: str,
         payment_ref: str,
+        payment_code: str,
+        bank_provider: str | None,
+        bank_credit_transfer_identificator: str | None,
     ) -> Any: ...
 
 
@@ -142,24 +146,44 @@ class PublicTransactionService:
         payee_address: str | None,
         payee_city: str | None,
         payee_account_number: str,
+        mcc: str | None,
         payload: CreatePosTransactionRequest,
+        qr_kind: str,
+        bank_provider: str | None,
+        bank_credit_transfer_identificator: str | None,
     ) -> MerchantTransactionCreateResponse:
-        qr_string = build_nbs_ips_qr_string(
-            payee_account_number=payee_account_number,
-            payee_name=payee_name,
-            payee_address=payee_address,
-            payee_city=payee_city,
-            amount=payload.amount,
-            currency="RSD",
-            payment_code="289",
-            payment_description=payload.payment_description,
-            payer_name=None,
-            payer_address=None,
-            payer_city=None,
-            reference_model=payload.reference_model,
-            reference_number=payload.reference_number,
-        )
         payment_ref = self._generate_payment_ref()
+        qr_string = (
+            build_merchant_pos_scan_qr_string(
+                payee_account_number=payee_account_number,
+                payee_name=payee_name,
+                payee_address=payee_address,
+                payee_city=payee_city,
+                amount=payload.amount,
+                currency="RSD",
+                payment_code="221",
+                payment_description=payload.payment_description,
+                mcc=mcc or "0000",
+                merchant_reference=bank_credit_transfer_identificator or payment_ref,
+                qr_kind=qr_kind,
+            )
+            if bank_credit_transfer_identificator is not None
+            else build_nbs_ips_qr_string(
+                payee_account_number=payee_account_number,
+                payee_name=payee_name,
+                payee_address=payee_address,
+                payee_city=payee_city,
+                amount=payload.amount,
+                currency="RSD",
+                payment_code="289",
+                payment_description=payload.payment_description,
+                payer_name=None,
+                payer_address=None,
+                payer_city=None,
+                reference_model=payload.reference_model,
+                reference_number=payload.reference_number,
+            )
+        )
         transaction = await self.transaction_repository.create_pos_draft(
             merchant_account_id=merchant_account_id,
             account_display_name=account_display_name,
@@ -170,10 +194,14 @@ class PublicTransactionService:
             payload=payload,
             qr_string=qr_string,
             payment_ref=payment_ref,
+            payment_code="221",
+            bank_provider=bank_provider,
+            bank_credit_transfer_identificator=bank_credit_transfer_identificator,
         )
         return MerchantTransactionCreateResponse(
             transaction_id=transaction["id"],
             payment_ref=payment_ref,
+            bank_credit_transfer_identificator=transaction["bank_credit_transfer_identificator"],
             status=transaction["status"],
             qr_string=qr_string,
         )

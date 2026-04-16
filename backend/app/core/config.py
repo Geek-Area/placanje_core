@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     supabase_service_role_key: str | None = None
     supabase_jwt_secret: str | None = None
     bank_webhook_secret: str | None = None
+    bank_bib_base_url: str = "http://ipspostest.bancaintesa.rs:9090"
+    bank_bib_timeout_seconds: int = Field(default=65, ge=5, le=300)
+    pos_session_ttl_hours: int = Field(default=24, ge=1, le=720)
     public_share_link_ttl_days: int = Field(default=30, ge=1, le=365)
 
     @field_validator("cors_allowed_origins", mode="before")

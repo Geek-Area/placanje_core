@@ -80,6 +80,9 @@ class TransactionRepository:
         payload: CreatePosTransactionRequest,
         qr_string: str,
         payment_ref: str,
+        payment_code: str,
+        bank_provider: str | None,
+        bank_credit_transfer_identificator: str | None,
     ) -> asyncpg.Record:
         return await self.connection.fetchrow(
             """
@@ -87,6 +90,8 @@ class TransactionRepository:
                 form_type,
                 status,
                 payment_ref,
+                bank_provider,
+                bank_credit_transfer_identificator,
                 merchant_account_id,
                 payee_name,
                 payee_address,
@@ -102,15 +107,17 @@ class TransactionRepository:
                 metadata
             )
             values (
-                $1, $2, $3, $4, $5, $6, $7,
-                $8, $9, $10, $11, $12, $13, $14, $15,
-                jsonb_build_object('merchant_account_display_name', $16::text)
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                jsonb_build_object('merchant_account_display_name', $18::text)
             )
-            returning id, created_at, status, payment_ref
+            returning id, created_at, status, payment_ref, bank_credit_transfer_identificator
             """,
             FormType.IPS.value,
             TransactionStatus.AWAITING_PAYMENT.value,
             payment_ref,
+            bank_provider,
+            bank_credit_transfer_identificator,
             merchant_account_id,
             payee_name,
             payee_address,
@@ -118,11 +125,84 @@ class TransactionRepository:
             payee_account_number,
             payload.amount,
             "RSD",
-            "289",
+            payment_code,
             payload.reference_model,
             payload.reference_number,
             payload.payment_description,
             qr_string,
+            account_display_name,
+        )
+
+    async def create_request_to_pay(
+        self,
+        *,
+        merchant_account_id: UUID,
+        account_display_name: str,
+        payee_name: str,
+        payee_address: str | None,
+        payee_city: str | None,
+        payee_account_number: str,
+        payer_name: str | None,
+        payer_address: str | None,
+        payer_city: str | None,
+        amount: Decimal,
+        payment_description: str | None,
+        payment_ref: str,
+        payment_code: str,
+        bank_provider: str,
+        bank_credit_transfer_identificator: str,
+    ) -> asyncpg.Record:
+        return await self.connection.fetchrow(
+            """
+            insert into public.transactions (
+                form_type,
+                status,
+                payment_ref,
+                bank_provider,
+                bank_credit_transfer_identificator,
+                merchant_account_id,
+                payer_name,
+                payer_address,
+                payer_city,
+                payee_name,
+                payee_address,
+                payee_city,
+                payee_account_number,
+                amount,
+                currency,
+                payment_code,
+                payment_description,
+                ips_qr_payload,
+                metadata
+            )
+            values (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                jsonb_build_object(
+                    'merchant_account_display_name', $19::text,
+                    'payment_flow', 'request_to_pay'
+                )
+            )
+            returning id, created_at, status, payment_ref, bank_credit_transfer_identificator
+            """,
+            FormType.IPS.value,
+            TransactionStatus.AWAITING_PAYMENT.value,
+            payment_ref,
+            bank_provider,
+            bank_credit_transfer_identificator,
+            merchant_account_id,
+            payer_name,
+            payer_address,
+            payer_city,
+            payee_name,
+            payee_address,
+            payee_city,
+            payee_account_number,
+            amount,
+            "RSD",
+            payment_code,
+            payment_description,
+            "",
             account_display_name,
         )
 
@@ -240,6 +320,10 @@ class TransactionRepository:
                 form_type,
                 status,
                 payment_ref,
+                bank_provider,
+                bank_credit_transfer_identificator,
+                bank_status_code,
+                bank_status_description,
                 amount,
                 currency,
                 payment_code,
@@ -277,6 +361,10 @@ class TransactionRepository:
                 form_type,
                 status,
                 payment_ref,
+                bank_provider,
+                bank_credit_transfer_identificator,
+                bank_status_code,
+                bank_status_description,
                 amount,
                 currency,
                 payment_code,
@@ -318,6 +406,31 @@ class TransactionRepository:
             merchant_account_id,
         )
 
+    async def get_account_transaction(
+        self,
+        *,
+        merchant_account_id: UUID,
+        transaction_id: UUID,
+    ) -> asyncpg.Record | None:
+        return await self.connection.fetchrow(
+            """
+            select *
+            from public.transactions
+            where merchant_account_id = $1
+              and id = $2
+            """,
+            merchant_account_id,
+            transaction_id,
+        )
+
+    async def next_bank_transaction_counter(self) -> int:
+        row = await self.connection.fetchrow(
+            """
+            select nextval('public.bank_credit_transfer_counter_seq')::bigint as value
+            """
+        )
+        return int(row["value"])
+
     async def mark_payment_completed(
         self,
         *,
@@ -338,6 +451,79 @@ class TransactionRepository:
             payment_ref,
             bank_transaction_ref,
             completed_at,
+        )
+
+    async def update_bank_status(
+        self,
+        *,
+        transaction_id: UUID,
+        bank_status_code: str,
+        bank_status_description: str | None,
+        checked_at: datetime,
+    ) -> str:
+        return await self.connection.execute(
+            """
+            update public.transactions
+            set
+                bank_status_code = $2,
+                bank_status_description = $3,
+                bank_status_checked_at = $4
+            where id = $1
+            """,
+            transaction_id,
+            bank_status_code,
+            bank_status_description,
+            checked_at,
+        )
+
+    async def mark_transaction_completed(
+        self,
+        *,
+        transaction_id: UUID,
+        bank_transaction_ref: str,
+        completed_at: datetime,
+        bank_status_code: str,
+        bank_status_description: str | None,
+    ) -> str:
+        return await self.connection.execute(
+            """
+            update public.transactions
+            set
+                status = 'completed',
+                bank_transaction_ref = $2,
+                completed_at = $3,
+                bank_status_code = $4,
+                bank_status_description = $5,
+                bank_status_checked_at = now()
+            where id = $1
+            """,
+            transaction_id,
+            bank_transaction_ref,
+            completed_at,
+            bank_status_code,
+            bank_status_description,
+        )
+
+    async def mark_transaction_failed(
+        self,
+        *,
+        transaction_id: UUID,
+        bank_status_code: str,
+        bank_status_description: str | None,
+    ) -> str:
+        return await self.connection.execute(
+            """
+            update public.transactions
+            set
+                status = 'failed',
+                bank_status_code = $2,
+                bank_status_description = $3,
+                bank_status_checked_at = now()
+            where id = $1
+            """,
+            transaction_id,
+            bank_status_code,
+            bank_status_description,
         )
 
     async def expire_awaiting_payment_transactions(self, *, older_than: datetime) -> str:

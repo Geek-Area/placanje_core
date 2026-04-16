@@ -20,6 +20,7 @@ class MerchantAccountRepository:
         payee_name: str,
         payee_address: str | None,
         payee_city: str | None,
+        mcc: str | None,
         subscription_tier: str | None,
     ) -> asyncpg.Record:
         return await self.connection.fetchrow(
@@ -35,9 +36,10 @@ class MerchantAccountRepository:
                 payee_name,
                 payee_address,
                 payee_city,
+                mcc,
                 subscription_tier
             )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             returning *
             """,
             parent_account_id,
@@ -50,6 +52,7 @@ class MerchantAccountRepository:
             payee_name,
             payee_address,
             payee_city,
+            mcc,
             subscription_tier,
         )
 

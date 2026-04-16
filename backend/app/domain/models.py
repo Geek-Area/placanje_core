@@ -132,6 +132,10 @@ class TransactionSummaryResponse(BaseModel):
     form_type: str
     status: str
     payment_ref: str
+    bank_provider: str | None = None
+    bank_credit_transfer_identificator: str | None = None
+    bank_status_code: str | None = None
+    bank_status_description: str | None = None
     amount: Decimal
     currency: str
     payment_code: str
@@ -182,6 +186,7 @@ class MerchantSignupRequest(BaseModel):
     payee_account_number: str
     payee_address: str | None = None
     payee_city: str | None = None
+    mcc: str | None = None
     subscription_tier: str | None = None
 
     @field_validator(
@@ -191,6 +196,7 @@ class MerchantSignupRequest(BaseModel):
         "payee_name",
         "payee_address",
         "payee_city",
+        "mcc",
         "subscription_tier",
         mode="before",
     )
@@ -224,8 +230,11 @@ class MerchantAccountCreateRequest(BaseModel):
     payee_account_number: str | None = None
     payee_address: str | None = None
     payee_city: str | None = None
+    mcc: str | None = None
 
-    @field_validator("display_name", "payee_name", "payee_address", "payee_city", mode="before")
+    @field_validator(
+        "display_name", "payee_name", "payee_address", "payee_city", "mcc", mode="before"
+    )
     @classmethod
     def _validate_text_fields(cls, value: object, info: ValidationInfo) -> str | None:
         if value is None:
@@ -258,12 +267,62 @@ class MerchantAccountResponse(BaseModel):
     payee_account_number: str | None
     payee_address: str | None
     payee_city: str | None
+    mcc: str | None = None
     active: bool
     effective_role: str | None
 
 
 class MerchantAccountListResponse(BaseModel):
     items: list[MerchantAccountResponse]
+
+
+class MerchantSessionResponse(BaseModel):
+    user_id: UUID
+    email: str
+    display_name: str | None
+    accounts: list[MerchantAccountResponse]
+
+
+class MerchantBankProfileUpsertRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    provider: str = "banca_intesa"
+    bank_user_id: str
+    terminal_identificator: str
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _validate_provider(cls, value: object) -> str:
+        provider = str(value).strip().lower()
+        if provider == "":
+            raise ValueError("provider must not be empty")
+        return provider
+
+    @field_validator("bank_user_id", mode="before")
+    @classmethod
+    def _validate_bank_user_id(cls, value: object) -> str:
+        normalized = validate_multiline_text(str(value), field="bank_user_id", max_length=64)
+        if normalized is None:
+            raise ValueError("bank_user_id must not be empty")
+        return normalized
+
+    @field_validator("terminal_identificator", mode="before")
+    @classmethod
+    def _validate_terminal_identificator(cls, value: object) -> str:
+        terminal_identificator = str(value).strip()
+        if len(terminal_identificator) != 8:
+            raise ValueError("terminal_identificator must be exactly 8 characters.")
+        if not terminal_identificator.isalnum():
+            raise ValueError("terminal_identificator must be alphanumeric.")
+        return terminal_identificator
+
+
+class MerchantBankProfileResponse(BaseModel):
+    merchant_account_id: UUID
+    provider: str
+    bank_user_id: str
+    terminal_identificator: str
+    active: bool
 
 
 class MerchantInviteRequest(BaseModel):
@@ -286,6 +345,7 @@ class MerchantInviteRequest(BaseModel):
 class MerchantInviteResponse(BaseModel):
     status: str
     invitation_mode: str
+    invite_id: UUID | None = None
     account_id: UUID
     invited_email: str
     role: str
@@ -310,6 +370,93 @@ class AcceptInviteResponse(BaseModel):
     status: str
     account_id: UUID
     role: str
+
+
+class RevokeInviteResponse(BaseModel):
+    status: str
+    invite_id: UUID
+
+
+class LogoutResponse(BaseModel):
+    status: str
+    scope: str
+
+
+class PosCredentialsUpsertRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def _validate_username(cls, value: str) -> str:
+        username = value.strip().lower()
+        if username == "":
+            raise ValueError("username must not be empty")
+        if len(username) < 3 or len(username) > 64:
+            raise ValueError("username must be between 3 and 64 characters")
+        return username
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, value: str) -> str:
+        password = value.strip()
+        if len(password) < 4:
+            raise ValueError("password must be at least 4 characters long")
+        if len(password) > 128:
+            raise ValueError("password must be at most 128 characters long")
+        return password
+
+
+class PosCredentialsResponse(BaseModel):
+    merchant_account_id: UUID
+    username: str
+    active: bool
+
+
+class PosLoginRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def _validate_login_username(cls, value: str) -> str:
+        username = value.strip().lower()
+        if username == "":
+            raise ValueError("username must not be empty")
+        return username
+
+    @field_validator("password")
+    @classmethod
+    def _validate_login_password(cls, value: str) -> str:
+        password = value.strip()
+        if password == "":
+            raise ValueError("password must not be empty")
+        return password
+
+
+class PosAccountContextResponse(BaseModel):
+    id: UUID
+    account_type: str
+    display_name: str
+    payee_name: str
+    payee_account_number: str | None
+    payee_address: str | None
+    payee_city: str | None
+    mcc: str | None
+
+
+class PosSessionResponse(BaseModel):
+    username: str
+    merchant_account: PosAccountContextResponse
+
+
+class PosLoginResponse(PosSessionResponse):
+    session_token: str
+    expires_at: datetime
 
 
 class CreatePosTransactionRequest(BaseModel):
@@ -343,9 +490,66 @@ class CreatePosTransactionRequest(BaseModel):
         return validate_reference_number(value)
 
 
+class MerchantRequestToPayRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    amount: Decimal
+    debtor_account_number: str
+    one_time_code: str | None = None
+    debtor_reference: str | None = None
+    debtor_name: str | None = None
+    debtor_address: str | None = None
+    payment_purpose: str | None = None
+
+    @field_validator("amount")
+    @classmethod
+    def _validate_amount(cls, value: Decimal) -> Decimal:
+        return validate_amount(value)
+
+    @field_validator("debtor_account_number")
+    @classmethod
+    def _validate_debtor_account_number(cls, value: str) -> str:
+        return normalize_account_number(value)
+
+    @field_validator("one_time_code", mode="before")
+    @classmethod
+    def _validate_one_time_code(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        token = str(value).strip()
+        if token == "":
+            return None
+        if len(token) > 10:
+            raise ValueError("one_time_code must be at most 10 characters.")
+        return token
+
+    @field_validator("debtor_reference", mode="before")
+    @classmethod
+    def _validate_debtor_reference(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        return validate_multiline_text(str(value), field="debtor_reference", max_length=140)
+
+    @field_validator("debtor_name", "debtor_address", mode="before")
+    @classmethod
+    def _validate_debtor_text(cls, value: object, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        field_name = info.field_name or "unknown_field"
+        return validate_multiline_text(str(value), field=field_name, max_length=70)
+
+    @field_validator("payment_purpose", mode="before")
+    @classmethod
+    def _validate_payment_purpose(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        return validate_multiline_text(str(value), field="payment_purpose", max_length=35)
+
+
 class MerchantTransactionCreateResponse(BaseModel):
     transaction_id: UUID
     payment_ref: str
+    bank_credit_transfer_identificator: str | None = None
     status: str
     qr_string: str
 

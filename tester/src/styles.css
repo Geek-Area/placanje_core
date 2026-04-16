@@ -492,6 +492,24 @@ a {
   margin-top: 1rem;
 }
 
+.qr-preview-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.9rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.qr-preview-image {
+  display: block;
+  width: min(100%, 260px);
+  height: auto;
+  image-rendering: pixelated;
+}
+
 .story-action {
   background: rgba(255, 255, 255, 0.82);
 }

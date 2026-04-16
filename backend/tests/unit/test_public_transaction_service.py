@@ -38,6 +38,7 @@ class FakeTransactionRepository:
             "id": UUID("30000000-0000-0000-0000-000000000001"),
             "created_at": datetime.now(tz=UTC),
             "payment_ref": kwargs["payment_ref"],
+            "bank_credit_transfer_identificator": kwargs["bank_credit_transfer_identificator"],
             "status": "awaiting_payment",
         }
 

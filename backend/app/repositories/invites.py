@@ -46,9 +46,23 @@ class PendingInviteRepository:
             from public.pending_invites
             where token = $1
               and accepted_at is null
+              and revoked_at is null
               and expires_at > now()
             """,
             token,
+        )
+
+    async def get_active_by_id(self, *, invite_id: UUID) -> asyncpg.Record | None:
+        return await self.connection.fetchrow(
+            """
+            select *
+            from public.pending_invites
+            where id = $1
+              and accepted_at is null
+              and revoked_at is null
+              and expires_at > now()
+            """,
+            invite_id,
         )
 
     async def mark_accepted(self, *, invite_id: UUID) -> None:
@@ -56,6 +70,16 @@ class PendingInviteRepository:
             """
             update public.pending_invites
             set accepted_at = now()
+            where id = $1
+            """,
+            invite_id,
+        )
+
+    async def mark_revoked(self, *, invite_id: UUID) -> None:
+        await self.connection.execute(
+            """
+            update public.pending_invites
+            set revoked_at = now()
             where id = $1
             """,
             invite_id,

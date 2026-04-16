@@ -21,20 +21,20 @@ http://localhost:5173
 
 ## What it does
 
-- signs up or signs in with Supabase Auth in the browser
-- sends the resulting JWT to the backend
-- documents the frontend contract for Pay slips and merchant POS flows
-- lets you test merchant signup
-- lets you create POS sub-accounts
-- lets you create POS transactions
-- lets you send a fake signed bank webhook
-- lets you test public and consumer Pay slips flows
-- optionally lets you test subscriptions
+- owner login with Supabase Auth in the browser
+- POS login with backend POS username/password
+- implementation docs for Pay slips and merchant POS flows
+- quick owner setup for main account, POS account, and POS login
+- POS QR generation, transaction list, and stats
+- public and consumer Pay slips testing
+- detailed backend testing in the advanced tab
 
-The UI has two tabs:
+The UI has four tabs:
 
+- `Admin setup`
+- `POS terminal`
 - `Documentation`
-- `Testing`
+- `Advanced`
 
 ## Before you use it
 
@@ -52,3 +52,7 @@ And in the tester UI itself fill:
 - Supabase URL
 - Supabase publishable key
 - bank webhook secret
+
+Owner login uses Supabase.
+
+POS login does not use Supabase. It uses POS credentials created by the owner inside the workbench.

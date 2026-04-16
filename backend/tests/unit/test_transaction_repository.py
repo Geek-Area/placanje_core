@@ -20,6 +20,7 @@ class FakeConnection:
             "created_at": None,
             "status": "awaiting_payment",
             "payment_ref": "PLC-TEST",
+            "bank_credit_transfer_identificator": "TID1234526106000001",
         }
 
 
@@ -43,7 +44,10 @@ async def test_create_pos_draft_casts_metadata_value_to_text() -> None:
         ),
         qr_string="K:PR|V:01",
         payment_ref="PLC-TEST",
+        payment_code="221",
+        bank_provider="banca_intesa",
+        bank_credit_transfer_identificator="TID1234526106000001",
     )
 
     assert connection.query is not None
-    assert "jsonb_build_object('merchant_account_display_name', $16::text)" in connection.query
+    assert "jsonb_build_object('merchant_account_display_name', $18::text)" in connection.query

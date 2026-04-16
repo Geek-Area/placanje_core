@@ -3,25 +3,41 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.core.deps import get_current_principal, get_merchant_service, get_subscription_service
+from app.core.deps import (
+    get_auth_session_service,
+    get_current_principal,
+    get_merchant_service,
+    get_raw_bearer_token,
+    get_subscription_service,
+)
 from app.domain.auth import AuthPrincipal
 from app.domain.models import (
     AcceptInviteRequest,
     AcceptInviteResponse,
     CreatePosTransactionRequest,
     CreateSubscriptionRequest,
+    LogoutResponse,
     MerchantAccountCreateRequest,
     MerchantAccountListResponse,
     MerchantAccountResponse,
     MerchantAccountStatsResponse,
+    MerchantBankProfileResponse,
+    MerchantBankProfileUpsertRequest,
     MerchantInviteRequest,
     MerchantInviteResponse,
+    MerchantRequestToPayRequest,
+    MerchantSessionResponse,
     MerchantSignupRequest,
     MerchantTransactionCreateResponse,
+    PosCredentialsResponse,
+    PosCredentialsUpsertRequest,
+    RevokeInviteResponse,
     SubscriptionMutationResponse,
     SubscriptionSummaryResponse,
     TransactionListResponse,
+    TransactionSummaryResponse,
 )
+from app.services.auth_sessions import AuthSessionService
 from app.services.merchant import MerchantService
 from app.services.subscriptions import SubscriptionService
 
@@ -34,6 +50,23 @@ async def list_merchant_accounts(
     service: MerchantService = Depends(get_merchant_service),
 ) -> MerchantAccountListResponse:
     return await service.list_accounts(principal=principal)
+
+
+@router.get("/session", response_model=MerchantSessionResponse)
+async def get_merchant_session(
+    principal: AuthPrincipal = Depends(get_current_principal),
+    service: MerchantService = Depends(get_merchant_service),
+) -> MerchantSessionResponse:
+    return await service.get_session(principal=principal)
+
+
+@router.post("/logout", response_model=LogoutResponse)
+async def logout_merchant(
+    access_token: str = Depends(get_raw_bearer_token),
+    service: AuthSessionService = Depends(get_auth_session_service),
+) -> LogoutResponse:
+    payload = await service.revoke_current_session(access_token=access_token)
+    return LogoutResponse(**payload)
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED, response_model=MerchantAccountResponse)
@@ -86,6 +119,45 @@ async def accept_invite(
     return await service.accept_invite(principal=principal, token=payload.token)
 
 
+@router.post("/invites/{invite_id}/revoke", response_model=RevokeInviteResponse)
+async def revoke_invite(
+    invite_id: UUID,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    service: MerchantService = Depends(get_merchant_service),
+) -> RevokeInviteResponse:
+    return await service.revoke_invite(principal=principal, invite_id=invite_id)
+
+
+@router.put(
+    "/accounts/{account_id}/bank-profile",
+    response_model=MerchantBankProfileResponse,
+)
+async def upsert_bank_profile(
+    account_id: UUID,
+    payload: MerchantBankProfileUpsertRequest,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    service: MerchantService = Depends(get_merchant_service),
+) -> MerchantBankProfileResponse:
+    return await service.configure_bank_profile(
+        principal=principal, account_id=account_id, payload=payload
+    )
+
+
+@router.put(
+    "/accounts/{account_id}/pos-credentials",
+    response_model=PosCredentialsResponse,
+)
+async def upsert_pos_credentials(
+    account_id: UUID,
+    payload: PosCredentialsUpsertRequest,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    service: MerchantService = Depends(get_merchant_service),
+) -> PosCredentialsResponse:
+    return await service.upsert_pos_credentials(
+        principal=principal, account_id=account_id, payload=payload
+    )
+
+
 @router.post(
     "/accounts/{account_id}/transactions",
     status_code=status.HTTP_201_CREATED,
@@ -99,6 +171,23 @@ async def create_pos_transaction(
 ) -> MerchantTransactionCreateResponse:
     return await service.create_pos_transaction(
         principal=principal, account_id=account_id, payload=payload
+    )
+
+
+@router.post(
+    "/accounts/{account_id}/request-to-pay",
+    response_model=TransactionSummaryResponse,
+)
+async def request_to_pay(
+    account_id: UUID,
+    payload: MerchantRequestToPayRequest,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    service: MerchantService = Depends(get_merchant_service),
+) -> TransactionSummaryResponse:
+    return await service.request_to_pay(
+        principal=principal,
+        account_id=account_id,
+        payload=payload,
     )
 
 
@@ -125,6 +214,23 @@ async def get_account_stats(
     service: MerchantService = Depends(get_merchant_service),
 ) -> MerchantAccountStatsResponse:
     return await service.get_account_stats(principal=principal, account_id=account_id)
+
+
+@router.post(
+    "/accounts/{account_id}/transactions/{transaction_id}/sync-bank-status",
+    response_model=TransactionSummaryResponse,
+)
+async def sync_bank_transaction_status(
+    account_id: UUID,
+    transaction_id: UUID,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    service: MerchantService = Depends(get_merchant_service),
+) -> TransactionSummaryResponse:
+    return await service.sync_bank_transaction_status(
+        principal=principal,
+        account_id=account_id,
+        transaction_id=transaction_id,
+    )
 
 
 @router.post(
